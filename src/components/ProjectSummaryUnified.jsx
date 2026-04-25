@@ -67,6 +67,7 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() }
         }}
+        title={expanded ? 'Click to collapse — hide section detail' : 'Click to expand — read section detail (cross-sections, CDF breakdown, top aircraft, PCI history)'}
         className={`w-full flex items-center gap-4 px-6 py-4 hover:bg-surface-low transition-colors text-left cursor-pointer ${
           expanded ? 'bg-surface-low' : ''
         }`}
@@ -88,10 +89,6 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
             : 'bg-failing/10 text-failing'
         }`}>
           {(() => {
-            // Show the dominant verdict to avoid the confusing "0/4 OVER" pattern.
-            //   All OVER  → "N/N OVER"  (green)
-            //   All UNDER → "N/N UNDER" (red)
-            //   Mixed     → "X OVER · Y UNDER" (red)
             if (underCount === 0) return `${overCount}/${aptResults.length} OVER`
             if (overCount === 0)  return `${underCount}/${aptResults.length} UNDER`
             return `${overCount} OVER · ${underCount} UNDER`
@@ -102,17 +99,24 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
         </span>
         <span className="font-mono font-bold text-sm whitespace-nowrap">{fmtCdfShort(maxCdf)}</span>
         {worstControlling && (
-          <span className="text-[10px] text-outline whitespace-nowrap min-w-[6rem] text-right">
-            {worstControlling}
+          <span
+            className="text-[10px] text-outline whitespace-nowrap italic"
+            title={`Controlling failure mode: ${worstControlling}`}
+          >
+            ctrl: {worstControlling}
           </span>
         )}
+        {/* Hint that the row body opens the report-style detail panel below */}
+        <span className="text-[10px] text-outline whitespace-nowrap pl-3 border-l border-outline-variant/30">
+          {expanded ? 'Hide details ▴' : 'Read details ▾'}
+        </span>
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onOpenInTool(airport.icao) }}
-          title="Open this airport in Design Tool"
-          className="text-[10px] font-bold text-primary hover:underline whitespace-nowrap"
+          title="Switch to the Design Tool tab and open this airport for live what-if analysis"
+          className="text-[10px] font-bold text-primary hover:underline whitespace-nowrap pl-3 border-l border-outline-variant/30"
         >
-          Open →
+          Design Tool →
         </button>
       </div>
 
