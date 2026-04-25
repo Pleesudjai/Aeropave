@@ -197,7 +197,11 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
                       isOpen ? 'ring-2 ring-primary/20' : ''
                     }`}
                   >
-                    {/* Header row — section identity + verdict badges + actions */}
+                    {/* Header row — section identity + verdict badges + actions.
+                        Same labeling convention as the airport row above:
+                          • 'ctrl: PCC Fatigue' = informational status (italic)
+                          • 'Read details ▾' = inline expand (CDF breakdown + top aircraft + PCI/distress)
+                          • 'Design Tool →' = navigation to live what-if tab */}
                     <div
                       role="button"
                       tabIndex={0}
@@ -208,6 +212,7 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
                           setOpenSectionKey(isOpen ? null : key)
                         }
                       }}
+                      title={isOpen ? 'Click to collapse — hide CDF breakdown and per-aircraft / PCI / distress detail' : 'Click to expand — read CDF breakdown, top-10 aircraft, PCI history, distress breakdown'}
                       className="flex items-center gap-3 px-5 py-3 hover:bg-surface-low cursor-pointer"
                     >
                       <span className="font-mono text-base font-bold text-on-surface min-w-[4rem]">
@@ -220,8 +225,11 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
                       <span className="font-mono text-sm font-bold whitespace-nowrap">
                         CDF {fmtCdf(r.cdf_max)}
                       </span>
-                      <span className="text-xs text-outline whitespace-nowrap min-w-[7rem] text-right">
-                        {r.controlling}
+                      <span
+                        className="text-xs text-outline whitespace-nowrap italic"
+                        title={`Controlling failure mode: ${r.controlling}`}
+                      >
+                        ctrl: {r.controlling}
                       </span>
                       <span
                         className={`inline-block text-[9px] font-bold uppercase tracking-widest px-3 py-1 rounded whitespace-nowrap ${
@@ -230,21 +238,18 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
                       >
                         {r.adequate ? 'OVER' : 'UNDER'}
                       </span>
-                      <span
-                        className={`material-symbols-outlined text-outline/60 transition-transform text-lg ${
-                          isOpen ? 'rotate-180' : ''
-                        }`}
-                        title={isOpen ? 'Collapse details' : 'Expand details'}
-                      >
-                        expand_more
+                      {/* Inline-expand hint: opens the report-style detail panel below this section card */}
+                      <span className="text-[10px] text-outline whitespace-nowrap pl-3 border-l border-outline-variant/30">
+                        {isOpen ? 'Hide details ▴' : 'Read details ▾'}
                       </span>
+                      {/* Navigate to Design Tool tab for live what-if analysis on this exact section */}
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); onOpenInTool(r.icao, r.section_id) }}
-                        title="Open in Design Tool"
-                        className="text-outline/40 hover:text-primary transition-colors p-1 rounded hover:bg-primary/10"
+                        title="Switch to the Design Tool tab and open this section for live what-if analysis"
+                        className="text-[10px] font-bold text-primary hover:underline whitespace-nowrap pl-3 border-l border-outline-variant/30"
                       >
-                        <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                        Design Tool →
                       </button>
                     </div>
 
