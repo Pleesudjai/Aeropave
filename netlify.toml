@@ -1,0 +1,32 @@
+# Netlify configuration for AeroPave static frontend deployment.
+#
+# Live FAARFIELD backend (FaarfieldApi.exe + FAA proprietary DLLs) is NOT deployed
+# — it is local-only.  The Netlify-hosted site runs in "report-only mode": all
+# pre-cal'd CDF results, charts, gear-footprint diagrams, PCI/distress panels,
+# and frost-protection panels work fully from static JSON in src/data/.  Live
+# recompute, LEAF stress contour, and 3D FEM mesh viewer show "FAARFIELD backend
+# offline" badges and disable cleanly.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA-style fallback so deep links (none currently used, but safe default) work.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# Cache headers — long-cache the build hash assets, no-cache the index.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
