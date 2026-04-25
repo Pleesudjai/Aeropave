@@ -10,7 +10,9 @@ export default function Hero({ underCount, overCount, totalSections }) {
           Interactive CDF analysis for 6 airports (13 pavement sections) using FAARFIELD 2.1.1 methodology.
           Hybrid data from FAA ArcGIS, USDA NRCS, and FAA Terminal Area Forecast.
         </p>
-        <p className="mt-2 text-xs text-outline">Chidchanok Pleesudjai — Arizona State University — Spring 2026</p>
+        <p className="mt-2 text-xs text-outline">
+          Chidchanok Pleesudjai · Can Atakan Ozturk · Kai Halland — Arizona State University — Spring 2026
+        </p>
       </div>
       <div className="col-span-4 flex gap-4">
         <div className="flex-1 bg-failing-bg rounded-xl p-6 flex flex-col items-center justify-center">
