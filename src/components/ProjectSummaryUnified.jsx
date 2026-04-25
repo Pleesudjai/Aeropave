@@ -106,18 +106,13 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
             ctrl: {worstControlling}
           </span>
         )}
-        {/* Hint that the row body opens the report-style detail panel below */}
+        {/* Hint that the row body opens the report-style detail panel below.
+            (No 'Design Tool →' button at the airport level — use the per-section
+            row inside instead, which navigates to the EXACT section the user
+            wants to analyze.) */}
         <span className="text-[10px] text-outline whitespace-nowrap pl-3 border-l border-outline-variant/30">
           {expanded ? 'Hide details ▴' : 'Read details ▾'}
         </span>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onOpenInTool(airport.icao) }}
-          title="Switch to the Design Tool tab and open this airport for live what-if analysis"
-          className="text-[10px] font-bold text-primary hover:underline whitespace-nowrap pl-3 border-l border-outline-variant/30"
-        >
-          Design Tool →
-        </button>
       </div>
 
       {/* Expanded — per-section cards (each with cross-section inline) + chart + cards */}
