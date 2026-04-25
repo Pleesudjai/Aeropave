@@ -45,8 +45,8 @@ export default function PerSectionDetail({ r, apt }) {
   )
 
   return (
-    <div className="grid grid-cols-12 gap-6">
-      <div className="col-span-5">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
+      <div className="lg:col-span-5">
         <h4 className="text-[10px] font-bold uppercase tracking-widest text-outline mb-3">
           CDF breakdown (3 failure modes)
         </h4>
@@ -121,7 +121,7 @@ export default function PerSectionDetail({ r, apt }) {
         </div>
       </div>
 
-      <div className="col-span-7">
+      <div className="lg:col-span-7 overflow-x-auto">
         <h4 className="text-[10px] font-bold uppercase tracking-widest text-outline mb-3">
           Top {top.length} aircraft by CDF contribution
         </h4>

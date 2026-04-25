@@ -68,7 +68,7 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
           if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() }
         }}
         title={expanded ? 'Click to collapse — hide section detail' : 'Click to expand — read section detail (cross-sections, CDF breakdown, top aircraft, PCI history)'}
-        className={`w-full flex items-center gap-4 px-6 py-4 hover:bg-surface-low transition-colors text-left cursor-pointer ${
+        className={`w-full flex flex-wrap items-center gap-x-3 gap-y-1 sm:gap-4 px-3 sm:px-6 py-3 sm:py-4 hover:bg-surface-low transition-colors text-left cursor-pointer ${
           expanded ? 'bg-surface-low' : ''
         }`}
       >
@@ -76,11 +76,11 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
           chevron_right
         </span>
         <span className={`w-2.5 h-2.5 rounded-full ${dotColor}`} />
-        <span className="text-base font-bold text-on-surface min-w-[3.5rem]">{airport.icao}</span>
-        <span className="text-sm text-outline truncate flex-1 max-w-[16rem]">
+        <span className="text-base font-bold text-on-surface min-w-[3rem]">{airport.icao}</span>
+        <span className="hidden sm:inline text-sm text-outline truncate flex-1 max-w-[16rem]">
           {airport.name}{airport.state ? `, ${airport.state}` : ''}
         </span>
-        <span className="text-[10px] font-mono text-outline whitespace-nowrap">
+        <span className="hidden sm:inline text-[10px] font-mono text-outline whitespace-nowrap">
           {aptSections.length} section{aptSections.length > 1 ? 's' : ''}
         </span>
         <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded whitespace-nowrap ${
@@ -94,24 +94,21 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
             return `${overCount} OVER · ${underCount} UNDER`
           })()}
         </span>
-        <span className="ml-auto text-[10px] uppercase tracking-widest text-outline whitespace-nowrap">
+        <span className="ml-auto hidden sm:inline text-[10px] uppercase tracking-widest text-outline whitespace-nowrap">
           max CDF
         </span>
         <span className="font-mono font-bold text-sm whitespace-nowrap">{fmtCdfShort(maxCdf)}</span>
         {worstControlling && (
           <span
-            className="text-[10px] text-outline whitespace-nowrap italic"
+            className="hidden md:inline text-[10px] text-outline whitespace-nowrap italic"
             title={`Controlling failure mode: ${worstControlling}`}
           >
             ctrl: {worstControlling}
           </span>
         )}
-        {/* Hint that the row body opens the report-style detail panel below.
-            (No 'Design Tool →' button at the airport level — use the per-section
-            row inside instead, which navigates to the EXACT section the user
-            wants to analyze.) */}
-        <span className="text-[10px] text-outline whitespace-nowrap pl-3 border-l border-outline-variant/30">
-          {expanded ? 'Hide details ▴' : 'Read details ▾'}
+        {/* Inline-expand hint — last column on mobile too */}
+        <span className="text-[10px] text-outline whitespace-nowrap sm:pl-3 sm:border-l sm:border-outline-variant/30 ml-auto sm:ml-0">
+          {expanded ? 'Hide ▴' : 'Read ▾'}
         </span>
       </div>
 
@@ -208,20 +205,20 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
                         }
                       }}
                       title={isOpen ? 'Click to collapse — hide CDF breakdown and per-aircraft / PCI / distress detail' : 'Click to expand — read CDF breakdown, top-10 aircraft, PCI history, distress breakdown'}
-                      className="flex items-center gap-3 px-5 py-3 hover:bg-surface-low cursor-pointer"
+                      className="flex flex-wrap items-center gap-x-2 gap-y-1 sm:gap-3 px-3 sm:px-5 py-3 hover:bg-surface-low cursor-pointer"
                     >
-                      <span className="font-mono text-base font-bold text-on-surface min-w-[4rem]">
+                      <span className="font-mono text-base font-bold text-on-surface min-w-[3.5rem]">
                         {r.section_id}
                       </span>
-                      <span className="text-xs text-outline uppercase tracking-widest min-w-[5rem]">
+                      <span className="hidden sm:inline text-xs text-outline uppercase tracking-widest min-w-[5rem]">
                         {r.use}
                       </span>
-                      <span className="text-sm font-medium flex-1 truncate">{r.desc}</span>
+                      <span className="hidden md:inline text-sm font-medium flex-1 truncate">{r.desc}</span>
                       <span className="font-mono text-sm font-bold whitespace-nowrap">
                         CDF {fmtCdf(r.cdf_max)}
                       </span>
                       <span
-                        className="text-xs text-outline whitespace-nowrap italic"
+                        className="hidden md:inline text-xs text-outline whitespace-nowrap italic"
                         title={`Controlling failure mode: ${r.controlling}`}
                       >
                         ctrl: {r.controlling}
@@ -233,18 +230,19 @@ function AirportGroup({ airport, sections, results, expanded, onToggle, onOpenIn
                       >
                         {r.adequate ? 'OVER' : 'UNDER'}
                       </span>
-                      {/* Inline-expand hint: opens the report-style detail panel below this section card */}
-                      <span className="text-[10px] text-outline whitespace-nowrap pl-3 border-l border-outline-variant/30">
-                        {isOpen ? 'Hide details ▴' : 'Read details ▾'}
+                      {/* Inline-expand hint */}
+                      <span className="text-[10px] text-outline whitespace-nowrap sm:pl-3 sm:border-l sm:border-outline-variant/30 ml-auto sm:ml-0">
+                        {isOpen ? 'Hide ▴' : 'Read ▾'}
                       </span>
-                      {/* Navigate to Design Tool tab for live what-if analysis on this exact section */}
+                      {/* Navigate to Design Tool — compact on mobile */}
                       <button
                         type="button"
                         onClick={(e) => { e.stopPropagation(); onOpenInTool(r.icao, r.section_id) }}
                         title="Switch to the Design Tool tab and open this section for live what-if analysis"
-                        className="text-[10px] font-bold text-primary hover:underline whitespace-nowrap pl-3 border-l border-outline-variant/30"
+                        className="text-[10px] font-bold text-primary hover:underline whitespace-nowrap sm:pl-3 sm:border-l sm:border-outline-variant/30"
                       >
-                        Design Tool →
+                        <span className="sm:hidden">Tool →</span>
+                        <span className="hidden sm:inline">Design Tool →</span>
                       </button>
                     </div>
 
@@ -301,7 +299,7 @@ export default function ProjectSummaryUnified({ airports, sections, cdfResults, 
 
   return (
     <section>
-      <div className="flex items-center gap-3 mb-4">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-4">
         <span className="material-symbols-outlined text-primary">table_chart</span>
         <h3 className="text-xl font-bold tracking-tight">Project Summary</h3>
         <span className="text-[10px] font-bold uppercase tracking-widest text-outline">
@@ -310,7 +308,7 @@ export default function ProjectSummaryUnified({ airports, sections, cdfResults, 
           <span className="text-outline mx-1">/</span>
           <span className="text-failing">{underCount} UNDER</span>
         </span>
-        <div className="ml-auto flex items-center gap-2 text-[10px]">
+        <div className="sm:ml-auto flex items-center gap-2 text-[10px]">
           <button
             type="button"
             onClick={expandAll}
