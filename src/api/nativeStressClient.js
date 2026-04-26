@@ -2,6 +2,35 @@
 // Backend has CORS enabled (Access-Control-Allow-Origin: *).
 const BASE = 'http://localhost:5100'
 
+// Precal manifest (build-time import). Lists which (sectionKey, aircraftIcao)
+// pairs have static stress JSONs available under /public/data/precal/.
+// Manifest lives in src/ (small, imported at build); payloads live in public/
+// (~160 MB, fetched at runtime only when needed).
+import precalIndex from '../data/precal/index.json'
+
+// Precal cache helper. Returns the cached payload when (sectionKey, aircraftIcao)
+// matches a baked entry. The caller (DesignTool) is responsible for setting
+// sectionKey to null when the user has edited inputs past as-built — we trust
+// that gate rather than re-deriving a request hash here, because Python's float
+// serialization (e.g., 6.0) and JS's (e.g., 6 after JSON round-trip) don't
+// agree byte-for-byte.
+async function loadPrecal(sectionKey, aircraftIcao, layers, subgrade, endpoint) {
+  if (!sectionKey || !aircraftIcao) return null
+  const section = precalIndex.sections?.find(s => s.sectionKey === sectionKey)
+  if (!section) return null
+  const ac = section.aircraft?.find(a => a.icao === aircraftIcao)
+  if (!ac) return null
+  const path = ac[`${endpoint}Path`]
+  if (!path) return null
+  try {
+    const r = await fetch(path)
+    if (!r.ok) return null
+    const data = await r.json()
+    if (data?._meta?.skipped) return null
+    return { data, source: 'precal' }
+  } catch { return null }
+}
+
 export async function checkHealth() {
   // Bumped to 8 s — when the backend is mid-CDF (especially FEM3D) the single-
   // threaded HttpListener queues /api/health behind the in-flight request, so a
@@ -15,24 +44,39 @@ export async function checkHealth() {
   }
 }
 
-export async function fetchLeafGrid(layers, subgrade, aircraft, evalDepthIn, gridPoints = 21, gridExtentIn = null) {
-  try {
-    // v2: pass icao/gear/mtow for library-resolved geometry
-    const ac = {
-      name: aircraft.type || aircraft.name || 'Aircraft',
-      gearLoad: aircraft.gearLoad || (aircraft.mtow || 50000) * 0.95,
-      nTires: aircraft.nTires || 2,
-      tirePressure: aircraft.tirePressure || 200,
-      tireSpacingIn: aircraft.tireSpacingIn || 34,
-      icao: aircraft.type || aircraft.icao || '',
-      gear: aircraft.gear || '',
-      mtow: aircraft.mtow || 0,
-    }
+export async function fetchLeafGrid(layers, subgrade, aircraft, evalDepthIn, gridPoints = 21, gridExtentIn = null, sectionKey = null) {
+  // v2: pass icao/gear/mtow for library-resolved geometry
+  const ac = {
+    name: aircraft.type || aircraft.name || 'Aircraft',
+    gearLoad: aircraft.gearLoad || (aircraft.mtow || 50000) * 0.95,
+    nTires: aircraft.nTires || 2,
+    tirePressure: aircraft.tirePressure || 200,
+    tireSpacingIn: aircraft.tireSpacingIn || 34,
+    icao: aircraft.type || aircraft.icao || '',
+    gear: aircraft.gear || '',
+    mtow: aircraft.mtow || 0,
+  }
 
-    // Auto-scale grid extent from library wheel coords (if not explicitly set)
+  // Precal-first: serve cached LEAF grid when (sectionKey, aircraft.icao)
+  // matches a baked entry AND the request hash still matches (i.e., user
+  // hasn't edited layers/subgrade past as-built). Avoids a 200-1000 ms live
+  // recompute on every aircraft swap for project-section views.
+  if (sectionKey && ac.icao) {
+    const precal = await loadPrecal(sectionKey, ac.icao, layers, subgrade, 'leafGrid')
+    if (precal) return precal
+  }
+
+  try {
+
+    // Auto-scale grid extent from library wheel coords (if not explicitly set).
+    // Rule: 40% margin past the outermost wheel, floored at 120" so even tiny
+    // GA aircraft display a useful surrounding context band. 1.4 × maxWheel
+    // keeps wide-bodies (e.g., B772 with wheels at ±243") to a 350" grid that
+    // still shows the gear cluster prominently rather than a tiny dot in a sea
+    // of empty contour.
     let extent = gridExtentIn
     if (extent === null || extent <= 0) {
-      extent = 80
+      extent = 120
       if (ac.icao) {
         try {
           const acRes = await fetch(`${BASE}/api/aircraft/${encodeURIComponent(ac.icao)}`)
@@ -41,7 +85,8 @@ export async function fetchLeafGrid(layers, subgrade, aircraft, evalDepthIn, gri
             if (acData.wheel_coords?.length) {
               const maxX = Math.max(...acData.wheel_coords.map(c => Math.abs(c.x || 0)))
               const maxY = Math.max(...acData.wheel_coords.map(c => Math.abs(c.y || 0)))
-              const computed = Math.ceil((Math.max(maxX, maxY) + 40) / 10) * 10
+              const maxXY = Math.max(maxX, maxY)
+              const computed = Math.ceil((maxXY * 1.4) / 10) * 10
               extent = Math.max(extent, computed)
               console.log(`[fetchLeafGrid] Auto-scaled gridExtent for ${ac.icao}: ${extent}" (wheels at ±${maxX.toFixed(0)}, ±${maxY.toFixed(0)})`)
             }
@@ -132,19 +177,27 @@ export async function fetchDesign(layers, subgrade, aircraftList, growth, life, 
   }
 }
 
-export async function fetchFem3dMesh(layers, subgrade, aircraft, highDetail = false, filterCoarse = true, includeStressField = false, stressAggregation = 'mean') {
+export async function fetchFem3dMesh(layers, subgrade, aircraft, highDetail = false, filterCoarse = true, includeStressField = false, stressAggregation = 'mean', sectionKey = null) {
+  const icao = aircraft.type || aircraft.icao || ''
+  const ac = {
+    name: icao || aircraft.name || 'Aircraft',
+    icao,
+    gear: aircraft.gear || '',
+    mtow: aircraft.mtow || 0,
+    gearLoad: aircraft.gearLoad || (aircraft.mtow || 50000) * 0.95,
+    nTires: aircraft.nTires || 2,
+    tirePressure: aircraft.tirePressure || 200,
+    tireSpacingIn: aircraft.tireSpacingIn || 34,
+  }
+
+  // Precal-first (see fetchLeafGrid). Avoids 5-15 s FEM3D recomputes when
+  // browsing aircraft on as-built sections.
+  if (sectionKey && icao) {
+    const precal = await loadPrecal(sectionKey, icao, layers, subgrade, 'fem3dMesh')
+    if (precal) return precal
+  }
+
   try {
-    const icao = aircraft.type || aircraft.icao || ''
-    const ac = {
-      name: icao || aircraft.name || 'Aircraft',
-      icao,
-      gear: aircraft.gear || '',
-      mtow: aircraft.mtow || 0,
-      gearLoad: aircraft.gearLoad || (aircraft.mtow || 50000) * 0.95,
-      nTires: aircraft.nTires || 2,
-      tirePressure: aircraft.tirePressure || 200,
-      tireSpacingIn: aircraft.tireSpacingIn || 34,
-    }
     const res = await fetch(`${BASE}/api/fem3d/mesh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -170,19 +223,26 @@ export async function fetchFem3dMesh(layers, subgrade, aircraft, highDetail = fa
   }
 }
 
-export async function fetchLeafProfile(layers, subgrade, aircraft, evalDepths) {
+export async function fetchLeafProfile(layers, subgrade, aircraft, evalDepths, sectionKey = null) {
+  // v2: pass icao/gear/mtow for library-resolved geometry
+  const ac = {
+    name: aircraft.type || aircraft.name || 'Aircraft',
+    gearLoad: aircraft.gearLoad || (aircraft.mtow || 50000) * 0.95,
+    nTires: aircraft.nTires || 2,
+    tirePressure: aircraft.tirePressure || 200,
+    tireSpacingIn: aircraft.tireSpacingIn || 34,
+    icao: aircraft.type || aircraft.icao || '',
+    gear: aircraft.gear || '',
+    mtow: aircraft.mtow || 0,
+  }
+
+  // Precal-first (see fetchLeafGrid).
+  if (sectionKey && ac.icao) {
+    const precal = await loadPrecal(sectionKey, ac.icao, layers, subgrade, 'leafPoint')
+    if (precal) return precal
+  }
+
   try {
-    // v2: pass icao/gear/mtow for library-resolved geometry
-    const ac = {
-      name: aircraft.type || aircraft.name || 'Aircraft',
-      gearLoad: aircraft.gearLoad || (aircraft.mtow || 50000) * 0.95,
-      nTires: aircraft.nTires || 2,
-      tirePressure: aircraft.tirePressure || 200,
-      tireSpacingIn: aircraft.tireSpacingIn || 34,
-      icao: aircraft.type || aircraft.icao || '',
-      gear: aircraft.gear || '',
-      mtow: aircraft.mtow || 0,
-    }
     const res = await fetch(`${BASE}/api/leaf/point`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

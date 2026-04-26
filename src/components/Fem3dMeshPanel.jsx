@@ -110,7 +110,7 @@ function computeTriangleStressFromTensor(mesh, component, aggregation) {
 }
 
 function buildTraces(mesh, colorMode, triStress, stressRange, wheelDiagnostics, meshBounds, faceFilter = 'all') {
-  const { nodeCoords, surfaceTriNodes, surfaceTriLayerIds, surfaceTriFaceKinds, layers, wheelLoads, slabDomain } = mesh
+  const { nodeCoords, surfaceTriNodes, surfaceTriLayerIds, surfaceTriFaceKinds, layers, wheelLoads, slabDomain, gearOriginInMesh } = mesh
   if (!nodeCoords || !surfaceTriNodes) return []
 
   // Face filter predicate — used to skip tris that don't match the user's face pick.
@@ -217,48 +217,13 @@ function buildTraces(mesh, colorMode, triStress, stressRange, wheelDiagnostics, 
     const zTop = slabDomain ? slabDomain.zMax : 0
     const zLift = (slabDomain && (slabDomain.zMax - slabDomain.zMin) * 0.02) || 0.5
 
-    // If the backend sent per-wheel diagnostics (complex_exact_manual path),
-    // render each group separately so the user can SEE which wheels contribute,
-    // which are implicit symmetry mirrors, and which fell outside the mesh.
-    if (wheelDiagnostics && wheelDiagnostics.length > 0) {
-      const groups = {
-        contributing: { x: [], y: [], text: [], color: '#16a34a', border: '#14532d', symbol: 'diamond', name: 'Wheels — captured by FEM' },
-        mirror:       { x: [], y: [], text: [], color: '#94a3b8', border: '#475569', symbol: 'diamond-open', name: 'Wheels — implicit symmetry mirror' },
-        outside:      { x: [], y: [], text: [], color: '#dc2626', border: '#7f1d1d', symbol: 'x', name: 'Wheels — outside FEM mesh' },
-      }
-      wheelDiagnostics.forEach(w => {
-        const reason = w.skipReason || ''
-        const inside = w.nodeOverlapCount > 0
-        const bucket = inside
-          ? groups.contributing
-          : reason.toLowerCase().includes('symmetry')
-            ? groups.mirror
-            : groups.outside
-        bucket.x.push(w.x)
-        bucket.y.push(w.y)
-        bucket.text.push(reason || `${w.loadContributedLb?.toFixed(0) || 0} lb, ${w.nodeOverlapCount} nodes`)
-      })
-      Object.values(groups).forEach(g => {
-        if (g.x.length === 0) return
-        traces.push({
-          type: 'scatter3d', mode: 'markers', name: g.name,
-          x: g.x, y: g.y, z: g.x.map(() => zTop + zLift),
-          marker: { size: 8, color: g.color, symbol: g.symbol, line: { color: g.border, width: 1.5 } },
-          text: g.text,
-          hovertemplate: `${g.name}<br>x=%{x:.1f}" y=%{y:.1f}"<br>%{text}<extra></extra>`,
-        })
-      })
-    } else {
-      // Fallback: simple-gear native path — single red-diamond trace
-      traces.push({
-        type: 'scatter3d', mode: 'markers', name: 'Wheel load',
-        x: wheelLoads.map(w => w.x), y: wheelLoads.map(w => w.y),
-        z: wheelLoads.map(() => zTop + zLift),
-        marker: { size: 7, color: '#dc2626', symbol: 'diamond', line: { color: '#7f1d1d', width: 1.5 } },
-        hovertemplate: 'Wheel<br>x=%{x:.1f}" y=%{y:.1f}"<br>p=%{text} psi<extra></extra>',
-        text: wheelLoads.map(w => w.pressure?.toFixed(0) || '?'),
-      })
-    }
+    // Wheel markers intentionally NOT drawn here. The wheelLoads /
+    // wheelDiagnostics positions are reported in the AIRCRAFT frame, but
+    // FAARFIELD's single-slab FEM applies an equivalent-loading approximation
+    // near the mesh origin — so the stress peaks won't visually align with
+    // the wheel positions, which would be misleading. Users get accurate
+    // per-wheel locations from the LEAF Stress Contour panel above (LEAF
+    // computes Boussinesq from each wheel's actual position).
   }
 
   // FEM mesh extent rectangle — shows the user exactly what region the FEM
@@ -276,6 +241,36 @@ function buildTraces(mesh, colorMode, triStress, stressRange, wheelDiagnostics, 
       line: { color: '#2563eb', width: 4, dash: 'dash' },
       hoverinfo: 'skip',
     })
+
+    // Two reference lines for orientation:
+    //   1. X-symmetry plane (mesh X=0) — FAARFIELD's mathematical mirror;
+    //      always at mesh X=0 regardless of loading offset.
+    //   2. Aircraft lateral centerline (X = gearOriginInMesh.x) — the actual
+    //      midline between the left and right main gear struts. Coincides
+    //      with the runway centerline IF this analysis was run at zero
+    //      wander offset; offset by gearOriginInMesh.x otherwise.
+    const ySpan = slabDomain ? [slabDomain.yMin, slabDomain.yMax] : [yMin, yMax]
+    traces.push({
+      type: 'scatter3d', mode: 'lines', name: 'X-symmetry plane (mesh X=0)',
+      x: [0, 0],
+      y: ySpan,
+      z: [z + zLift * 0.5, z + zLift * 0.5],
+      line: { color: '#dc2626', width: 3, dash: 'dot' },
+      hovertemplate: 'X-symmetry plane<br>Mesh mirrors loads about X=0<extra></extra>',
+    })
+    if (gearOriginInMesh && Number.isFinite(gearOriginInMesh.x) && Math.abs(gearOriginInMesh.x) > 0.5) {
+      // Only draw if it's meaningfully different from mesh X=0 (skip when
+      // they coincide to avoid overlapping lines).
+      const cx = gearOriginInMesh.x
+      traces.push({
+        type: 'scatter3d', mode: 'lines', name: `Aircraft centerline (X = ${cx.toFixed(1)}″)`,
+        x: [cx, cx],
+        y: ySpan,
+        z: [z + zLift * 0.6, z + zLift * 0.6],
+        line: { color: '#0891b2', width: 4, dash: 'dash' },
+        hovertemplate: `Aircraft lateral centerline<br>X = ${cx.toFixed(2)}″ (offset ${cx.toFixed(1)}″ from mesh X=0)<extra></extra>`,
+      })
+    }
   }
 
   return traces
@@ -290,8 +285,9 @@ const CAMERA_PRESETS = {
   transverse:  { eye: { x: 0,   y: 2.4,  z: 0.2 }, up: { x: 0, y: 0, z: 1 } },
 }
 
-export default function Fem3dMeshPanel({ layers, subgrade, aircraft, enabled, cdfRunToken = 0 }) {
+export default function Fem3dMeshPanel({ layers, subgrade, aircraft, enabled, cdfRunToken = 0, sectionKey = null }) {
   const [meshData, setMeshData] = useState(null)
+  const [meshSource, setMeshSource] = useState(null)  // 'precal' | 'native' — for the badge
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [highDetail, setHighDetail] = useState(false)
@@ -361,9 +357,10 @@ export default function Fem3dMeshPanel({ layers, subgrade, aircraft, enabled, cd
     setLoading(true); setError(null)
     const snapshot = inputSignature
     try {
-      const result = await fetchFem3dMesh(layers, subgrade, normalizedAc, highDetail, true, wantStressField, stressAgg)
+      const result = await fetchFem3dMesh(layers, subgrade, normalizedAc, highDetail, true, wantStressField, stressAgg, sectionKey)
       if (result.data?.mesh) {
         setMeshData(result.data)
+        setMeshSource(result.source || 'native')
         hasEverRendered.current = true
         lastRunInputs.current = snapshot
       } else {
@@ -413,6 +410,20 @@ export default function Fem3dMeshPanel({ layers, subgrade, aircraft, enabled, cd
     // runMesh is stable enough not to need a dep — we intentionally fire only on token change.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cdfRunToken, enabled])
+
+  // Auto-fetch on initial mount when the (sectionKey, aircraft) pair is in the
+  // precal cache — pulling the cached mesh is ~10-50 ms so there's no reason to
+  // make the user click "Build mesh" first. For custom airports / edited inputs
+  // (sectionKey == null), defer to the explicit button so we don't accidentally
+  // fire a 10-15 s live FEM3D solve.
+  useEffect(() => {
+    if (!enabled || !sectionKey) return
+    if (hasEverRendered.current) return  // already running via the other auto-effects
+    if (loading) return
+    if (!layers?.length || !normalizedAc?.icao) return
+    runMesh()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, sectionKey, normalizedAc?.icao])
 
   // Per-triangle scalar derived directly from the backend's per-element
   // FEM tensor (no LEAF interpolation — this is real FAARFIELD FEM output).
@@ -745,12 +756,9 @@ export default function Fem3dMeshPanel({ layers, subgrade, aircraft, enabled, cd
                 FEM mesh coverage
               </p>
               <p>
-                <span className="font-bold">{meshData.wheelsInsideMeshCount}</span> of {meshData.wheelsInsideMeshCount + meshData.wheelsOutsideMeshCount} wheels
-                {' '}fall inside FAARFIELD's single-slab FEM region
-                {' '}(X∈[{meshData.meshBoundsXmin?.toFixed(0)}, {meshData.meshBoundsXmax?.toFixed(0)}]",
-                {' '}Y∈[{meshData.meshBoundsYmin?.toFixed(0)}, {meshData.meshBoundsYmax?.toFixed(0)}]").
-                {' '}Wheels outside are not captured in this single FEM pass — desktop FAARFIELD handles wide gears via multi-position offset sweep.
-                {' '}Gray wheels are implicit symmetry mirrors (the solver doubles their effect automatically); red X marks indicate wheels truly beyond the mesh.
+                FAARFIELD's single-slab FEM applies the gear as an <span className="font-semibold">equivalent loading</span> near the mesh origin — it doesn't simulate each tire at its physical aircraft-frame position. That's why this view doesn't show individual wheel pins. For the per-wheel footprint and stress lobes, see the <span className="font-semibold">Stress Contour (Native LEAF)</span> panel above — LEAF computes Boussinesq response from each wheel's actual position.
+                {' '}Mesh region: X∈[{meshData.meshBoundsXmin?.toFixed(0)}, {meshData.meshBoundsXmax?.toFixed(0)}]",
+                {' '}Y∈[{meshData.meshBoundsYmin?.toFixed(0)}, {meshData.meshBoundsYmax?.toFixed(0)}]".
               </p>
             </div>
           </div>
@@ -791,7 +799,13 @@ export default function Fem3dMeshPanel({ layers, subgrade, aircraft, enabled, cd
               <p className="text-sm font-mono font-bold text-on-surface">
                 {femSkipped ? <span className="italic text-outline text-sm">Skipped</span> : `${(compute / 1000).toFixed(1)} s`}
               </p>
-              <p className="text-[10px] text-outline">AMClassLib → FAASR3D</p>
+              <p className="text-[10px] text-outline">
+                {meshSource === 'precal' ? (
+                  <span className="text-green-700 font-semibold">⚡ from precal cache</span>
+                ) : (
+                  <>AMClassLib → FAASR3D <span className="text-outline italic">(live)</span></>
+                )}
+              </p>
             </div>
           </div>
           {femSkipped && (
@@ -804,7 +818,7 @@ export default function Fem3dMeshPanel({ layers, subgrade, aircraft, enabled, cd
           )}
           {!femSkipped && meshData.warnings?.length > 0 && (
             <div className="mt-2 text-[10px] bg-blue-50 text-blue-900 rounded px-3 py-2 space-y-1">
-              {meshData.warnings.map((w, i) => (
+              {meshData.warnings.filter(w => !/fell outside the FEM mesh/i.test(w)).map((w, i) => (
                 <p key={i}>
                   <span className="font-bold">Note:</span> {w}
                 </p>

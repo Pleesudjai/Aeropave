@@ -146,7 +146,7 @@ export default function DesignTool({
   const [resetKey, setResetKey] = useState(0)
 
   // Stress visualization aircraft selection — FAA default: highest CDF contribution
-  const [stressAircraftMode, setStressAircraftMode] = useState('top_cdf')
+  const [stressAircraftIcao, setStressAircraftIcao] = useState(null)  // null = auto-pick top-CDF
 
   // FEM3D toggle — off by default (adds ~15s per aircraft)
   // Default ON — FEM gives the FAARFIELD max(FEM, LEAF×0.95) rule which is
@@ -171,6 +171,21 @@ export default function DesignTool({
   const airportSections = allSections.filter(s => s.icao === currentAirport)
   const currentSectionId = selectedSection || airportSections[0]?.section_id
   const currentSection = allSections.find(s => s.section_id === currentSectionId)
+  // Key into the pre-baked stress cache (`public/data/precal/`). Format must
+  // match `{ICAO}_{sectionId}` exactly as written by scripts/prebake_stress_endpoints.py.
+  // Set to null when the user has edited any input past as-built — the cache
+  // was baked at as-built parameters, so serving it for custom inputs would
+  // show stale data.
+  const sectionKey = useMemo(() => {
+    if (!currentAirport || !currentSectionId || !isProject || !currentSection) return null
+    const sigLayers = (arr) => (arr || []).map(l => `${l.type}:${l.h}:${l.E}:${l.nu}`).join('|')
+    const baselineLayersSig = sigLayers(currentSection.layers)
+    const activeLayersSig = sigLayers(customLayers || currentSection.layers)
+    if (activeLayersSig !== baselineLayersSig) return null
+    const baselineCbr = currentSection.subgrade?.cbr ?? 7
+    if (Number(cbr) !== Number(baselineCbr)) return null
+    return `${currentAirport}_${currentSectionId}`
+  }, [currentAirport, currentSectionId, isProject, currentSection, customLayers, cbr])
   const originalResult = cdfResults.find(r => r.section_id === currentSectionId)
   const sub = subgradeData[currentAirport]
   const trafficData = traffic[currentAirport]
@@ -408,19 +423,20 @@ export default function DesignTool({
   // Memoized subgrade for stress visualization — avoids re-render loops from new object refs
   const stressSubgrade = useMemo(() => ({ E: cbrToModulus(cbr || 7), nu: 0.4 }), [cbr])
 
-  // Memoized aircraft for stress visualization — driven by native FAARFIELD per-aircraft data
+  // Memoized aircraft for stress visualization — driven by native FAARFIELD per-aircraft data.
+  // Default: top-CDF contributor. User can pick any other aircraft via stressAircraftIcao.
   const stressAircraft = useMemo(() => {
     const details = nativeCdf?.perAircraft || []
     const defaultAc = { type: 'B738', mtow: 174200, gear: 'D' }
     if (!details.length) return defaultAc
-    const sorted = stressAircraftMode === 'top_cdf'
-      ? [...details].sort((a, b) => (b.cdf || 0) - (a.cdf || 0))
-      : [...details].sort((a, b) => (b.mtow || 0) - (a.mtow || 0))
-    const top = sorted[0]
-    return top
-      ? { type: top.icao || top.name, mtow: top.mtow, gear: top.gear }
+    const sorted = [...details].sort((a, b) => (b.cdf || 0) - (a.cdf || 0))
+    const picked = stressAircraftIcao
+      ? sorted.find(a => (a.icao || a.name) === stressAircraftIcao) || sorted[0]
+      : sorted[0]
+    return picked
+      ? { type: picked.icao || picked.name, mtow: picked.mtow, gear: picked.gear }
       : defaultAc
-  }, [nativeCdf?.perAircraft, stressAircraftMode])
+  }, [nativeCdf?.perAircraft, stressAircraftIcao])
 
   // Step 4: completion checks
   const hasLayers = (customLayers || currentSection?.layers || []).length > 0
@@ -681,16 +697,6 @@ export default function DesignTool({
                   <span className="material-symbols-outlined text-primary animate-spin text-3xl mr-3">progress_activity</span>
                   <span className="text-sm text-outline">Running FAARFIELD engine...</span>
                 </div>
-              ) : !analysisAvailable ? (
-                <div className="bg-surface-lowest rounded-xl p-6 shadow-[0px_12px_32px_rgba(25,28,30,0.06)] border border-failing/30">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="material-symbols-outlined text-failing">cloud_off</span>
-                    <p className="text-sm font-bold text-failing">FAARFIELD backend offline</p>
-                  </div>
-                  <p className="text-xs text-outline">
-                    CDF analysis requires the native FAARFIELD desktop-parity backend (LEAFClassLib + AMClassLib + 2014 fatigue equations). Start <code className="font-mono">FaarfieldApi.exe</code> at <code className="font-mono">c:/temp/aeropave/faarfield-api/bin/x86/Release/</code> and reload — no approximate fallback is provided.
-                  </p>
-                </div>
               ) : activeResult ? (
                 <>
                   <VerdictCard
@@ -699,6 +705,11 @@ export default function DesignTool({
                   {nativeCdf.solver && (
                     <p className="text-[9px] text-outline mt-1 text-center">
                       {nativeCdf.solver} | {nativeCdf.computeTimeMs}ms
+                    </p>
+                  )}
+                  {!analysisAvailable && (
+                    <p className="text-[10px] text-outline mt-1 text-center italic">
+                      Backend offline — viewing pre-cal'd results. Start <code className="font-mono">FaarfieldApi.exe</code> to enable slider edits.
                     </p>
                   )}
 
@@ -790,6 +801,16 @@ export default function DesignTool({
                     </div>
                   )}
                 </>
+              ) : !analysisAvailable ? (
+                <div className="bg-surface-lowest rounded-xl p-6 shadow-[0px_12px_32px_rgba(25,28,30,0.06)] border border-failing/30">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="material-symbols-outlined text-failing">cloud_off</span>
+                    <p className="text-sm font-bold text-failing">Backend offline — custom airport requires live engine</p>
+                  </div>
+                  <p className="text-xs text-outline">
+                    The 13 project sections show pre-cal'd verdicts instantly. For other airports or slider edits, start <code className="font-mono">FaarfieldApi.exe</code> at <code className="font-mono">c:/temp/aeropave/faarfield-api/bin/x86/Release/</code> and reload.
+                  </p>
+                </div>
               ) : (
                 <div className="bg-surface-lowest rounded-xl p-8 shadow-[0px_12px_32px_rgba(25,28,30,0.06)] text-center">
                   <span className="material-symbols-outlined text-outline text-4xl mb-2">engineering</span>
@@ -842,14 +863,11 @@ export default function DesignTool({
           const totalDepth = activeLayers.reduce((s, l) => s + l.h, 0)
 
           // Label helpers (computed fresh for display, but stressAircraft is memoized)
-          const byMtow = [...details].sort((a, b) => (b.mtow || 0) - (a.mtow || 0))
           const byCdf = [...details].sort((a, b) => (b.cdf || 0) - (a.cdf || 0))
-          const heaviest = byMtow[0]
-          const topCdf = byCdf[0]
           const acIcao = stressAircraft.type || '?'
           const acMtow = (stressAircraft.mtow || 0).toLocaleString()
-          const heaviestLabel = heaviest ? `${heaviest.icao || heaviest.name} (${(heaviest.mtow||0).toLocaleString()} lbs)` : 'N/A'
-          const topCdfLabel = topCdf ? `${topCdf.icao || topCdf.name} (CDF ${(topCdf.cdf||0).toExponential(2)})` : 'N/A'
+          // Build per-aircraft option list — full contributor list, ranked by CDF.
+          // Pre-cal'd offline coverage = top 5 only; ranks 6+ work only when backend is live.
 
           return (
             <>
@@ -858,10 +876,21 @@ export default function DesignTool({
                 <span className="material-symbols-outlined text-primary text-xl">flight</span>
                 <div className="flex-1">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-outline mb-1">Stress Visualization Aircraft</p>
-                  <select value={stressAircraftMode} onChange={e => setStressAircraftMode(e.target.value)}
+                  <select
+                    value={stressAircraftIcao || ''}
+                    onChange={e => setStressAircraftIcao(e.target.value || null)}
                     className="bg-surface-low border border-outline-variant/30 rounded-lg px-3 py-1.5 text-sm font-medium focus:ring-2 focus:ring-primary w-full max-w-md">
-                    <option value="top_cdf">Design Aircraft (FAA: Highest CDF) — {topCdfLabel}</option>
-                    <option value="heaviest">Heaviest Aircraft (Max MTOW) — {heaviestLabel}</option>
+                    <option value="">Auto: top-CDF contributor (rank 1)</option>
+                    {byCdf.map((a, i) => {
+                      const id = a.icao || a.name
+                      const gearLabel = a.libGear || a.gear || '?'
+                      const offlineOk = i < 10 ? '' : ' — live only'
+                      return (
+                        <option key={id} value={id}>
+                          Rank {i + 1}: {id} [{gearLabel}] (CDF {(a.cdf || 0).toExponential(2)}, {(a.mtow || 0).toLocaleString()} lbs){offlineOk}
+                        </option>
+                      )
+                    })}
                   </select>
                 </div>
                 <div className="text-right">
@@ -878,6 +907,7 @@ export default function DesignTool({
                     aircraft={stressAircraft}
                     evalDepth={totalDepth}
                     nativeAvailable={nativeAvailable}
+                    sectionKey={sectionKey}
                   />
                 </div>
                 <div className="col-span-5">
@@ -886,6 +916,7 @@ export default function DesignTool({
                     subgrade={stressSubgrade}
                     aircraft={stressAircraft}
                     nativeAvailable={nativeAvailable}
+                    sectionKey={sectionKey}
                   />
                 </div>
               </div>
@@ -899,6 +930,7 @@ export default function DesignTool({
                   aircraft={stressAircraft}
                   enabled={useFem3d}
                   cdfRunToken={femCdfToken}
+                  sectionKey={sectionKey}
                 />
               )}
             </>
